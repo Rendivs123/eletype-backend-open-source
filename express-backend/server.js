@@ -5,7 +5,6 @@ const cors = require("cors");
 const mongoose = require("mongoose");
 const { body, validationResult } = require("express-validator");
 const { User } = require("./model/model.js");
-const e = require("express");
 const session = require("express-session");
 const flash = require("express-flash");
 const jwt = require("jsonwebtoken");
@@ -17,7 +16,7 @@ app.use(
     extended: true,
   })
 );
-app.use(flash());
+
 app.use(
   session({
     secret: "myhobbyiscalisthenic",
@@ -64,7 +63,7 @@ app.post(
       }),
     body("email")
       .isEmail()
-      .withMessage("Invalid email format!")
+      .withMessage("Email should be like user@gmail.com!")
       .custom(async (value) => {
         const existingEmail = await User.findOne({ email: value });
 
@@ -82,7 +81,7 @@ app.post(
   ],
   async (req, res) => {
     const errors = validationResult(req);
-    const { username, email, password, submit = false } = req.body;
+    const { username, email, password } = req.body;
 
     if (!errors.isEmpty())
       return res.json({
@@ -91,19 +90,19 @@ app.post(
         errors: errors.array(),
       });
 
-    const newUser = new User({
+    await new User({
       username,
       email,
       password,
-    });
+      token: "",
+      ninetySeconds: { score: 0 },
+      sixtySeconds: { score: 0 },
+      thirtySeconds: { score: 0 },
+      fifteenSeconds: { score: 0 },
+    }).save();
 
-    if (submit) {
-      await newUser.save();
-      res.json({ success: true, errors: [] });
-      console.log("Sign Up Success!");
-    } else {
-      res.json({ success: true, url: "/sign-up", errors: [] });
-    }
+    res.json({ success: true, url: "/login", errors: [], action: "sign-up" });
+    console.log("Sign Up Success!");
   }
 );
 
@@ -112,10 +111,10 @@ app.post(
   [
     body("email")
       .isEmail()
-      .withMessage("Invalid email format!")
+      .withMessage("Email should be like user@gmail.com!")
       .custom(async (value) => {
         const existingEmail = await User.findOne({ email: value });
-        console.log(existingEmail);
+
         if (!existingEmail && value) {
           throw new Error("Email doesn't exist!");
         }
@@ -139,7 +138,7 @@ app.post(
         return true;
       }),
   ],
-  (req, res) => {
+  async (req, res) => {
     const errors = validationResult(req);
     const { email, password, submit = false } = req.body;
 
@@ -152,41 +151,94 @@ app.post(
         errors: errors.array(),
       });
 
-      console.log(user)
+    const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
+      expiresIn: "7d",
+    });
 
-      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
-        expiresIn: "7d",
-      });
+    console.log("Login successfully!");
+    await User.updateOne(
+      { email },
+      {
+        $set: {
+          token,
+        },
+      }
+    );
 
-    if (submit) {
-      console.log("Login successfully!");
-      res.json({ success: true, errors: [], token });
-    } else {
-      res.json({ success: true, errors: [], token });
-    }
+    res.json({ success: true, url: "/", errors: [], token, action: "login" });
   }
 );
 
-function authenticateToken(req, res, next) {
+const authenticateToken = (req, res, next) => {
   const token = req.headers["authorization"];
 
   if (token == null) return res.sendStatus(401);
 
   jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, user) => {
-    console.log(err);
-
     if (err) return res.sendStatus(403);
 
     req.user = user;
 
     next();
   });
-}
+};
 
-app.get('/isAuthorized', authenticateToken, (req, res, next) => {
+const getUSers = () => {
+  return User.find();
+};
+
+app.get("/isAuthorized", authenticateToken, (req, res, next) => {
   console.log("User is authorized!");
-   res.json({authorized: true});
-})
+  res.json({ authorized: true });
+});
+
+app.get("/ranking", authenticateToken, async (req, res) => {
+  return res.json({ users: (await getUSers()) || [] });
+});
+
+app.post("/ranking", authenticateToken, async (req, res) => {
+  const { score, time, token } = req.body;
+  let timeName;
+
+  if (time === 90) {
+    timeName = "ninetySeconds";
+  }
+
+  if (time === 60) {
+    timeName = "sixtySeconds";
+  }
+
+  if (time === 30) {
+    timeName = "thirtySeconds";
+  }
+
+  if (time === 15) {
+    timeName = "fifteenSeconds";
+  }
+
+  const selectedUser = await User.findOne({ token });
+
+  const oldUserScore = selectedUser[timeName].score;
+  console.log(oldUserScore)
+  console.log(score)
+
+  if (score > oldUserScore) {
+    await User.updateOne(
+      { token },
+      {
+        $set: {
+          [timeName]: {
+            score,
+          },
+        },
+      }
+    );
+  } else {
+    console.log("Score lower than old score!");
+  }
+
+  res.json({ message: "Ranking!!" });
+});
 
 app.listen(port, () => {
   console.log("Server is running on port", port);
