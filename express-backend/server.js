@@ -142,7 +142,7 @@ app.post(
     const errors = validationResult(req);
     const { email, password, submit = false } = req.body;
 
-    const user = { email };
+    const user = { email, iat: Math.floor(Date.now() / 1000) };
 
     if (!errors.isEmpty())
       return res.json({
@@ -199,9 +199,13 @@ app.get("/user-by-token/:token", async (req, res) => {
 
   if (token === "" || token == null) return res.json({ payload: {} });
 
-  const { username, email } = await User.findOne({ token });
+  const user = await User.findOne({ token });
 
-  res.json({ payload: { username, email } });
+  if (!user) return res.json({ payload: { success: false } });
+
+  const { _id, username, email, token: { userToken} } = user;
+
+  res.json({ payload: { _id, username, email, token: userToken, success: true } });
 });
 
 app.get("/ranking", async (req, res) => {
@@ -209,6 +213,7 @@ app.get("/ranking", async (req, res) => {
   const usersWithoutPassword = usersWithPassword.map(
     ({
       _id,
+      token,
       username,
       email,
       ninetySeconds,
@@ -217,6 +222,7 @@ app.get("/ranking", async (req, res) => {
       fifteenSeconds,
     }) => ({
       _id,
+      token,
       username,
       email,
       ninetySeconds,
@@ -269,10 +275,11 @@ app.post("/ranking", async (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/user-profile/:token", authenticateToken, async (req, res) => {
-  const token = req.params.token;
+app.get("/user-profile/:id", async (req, res) => {
+  const selectedUserId = req.params.id;
 
-  if (token === "" || token == null) return res.json({ payload: {} });
+  if (selectedUserId === "" || selectedUserId == null)
+    return res.json({ payload: {} });
 
   const {
     username,
@@ -281,7 +288,7 @@ app.get("/user-profile/:token", authenticateToken, async (req, res) => {
     sixtySeconds,
     thirtySeconds,
     fifteenSeconds,
-  } = await User.findOne({ token });
+  } = await User.findOne({ _id: selectedUserId });
 
   res.json({
     payload: {
